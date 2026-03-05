@@ -1,77 +1,25 @@
-<h3 align="center">
-  <a href=#><img src="https://raw.githubusercontent.com/armbian/.github/master/profile/logosmall.png" alt="Armbian logo"></a>
-  <br><br>
-</h3>
+# Armbian Build
+This repository contains armbian build script to generate an image for Raspberry Pi 4.
+The image is specifically made for the 'ip terminals' project.
 
-## Purpose of This Repository
+## Building
+- Clone this repository
+- Run `build.sh` to start the build process. This will generate an image in the `output` folder.
+- Run `write.sh` to write the generated image to an SD card. Make sure to change the `SD_PATH` variable in the script to the correct device.
 
-The **Armbian Linux Build Framework** creates customizable OS images based on **Debian** or **Ubuntu** for **single-board computers (SBCs)** and embedded devices.
+## Info
+This repository contains a fork of the [original armbian build script](https://github.com/armbian/build).
+The fork is modified to:
+    - Build armbian for RPI4 using the `config-ip-terminal.conf` configuration file in the `userpatches` folder.
+        - Uses the `current` branch of the linux LTS kernel which is currently `6.18.x`
+        - Base the image on debian trixie
+        - Use `network-manager`
+        - And more... see the config file for details.
+    - Customize the image using `customize-image.sh`script in the `userpatches` folder.
+        - Use `overlayroot` to make the root filesystem read-only and create an immutable image.
+        - Create a user `cisco` with password `cisco`.
+        - Use a static IP address
+        - Installs various network debugging tools
+        - And more... see the script for details.
+    - Read the [Armbian build framework documentation](https://docs.armbian.com/Developer-Guide_Overview/) for more details.
 
-It builds a complete Linux system including kernel, bootloader, and root filesystem, giving you control over versions, configuration, firmware, device trees, and system optimizations.
-
-The framework supports **native**, **cross**, and **containerized** builds for multiple architectures (`x86_64`, `aarch64`, `armhf`, `riscv64`) and is suitable for development, testing, production, or automation.
-
-> **Looking for prebuilt images?** Use [Armbian Imager](https://github.com/armbian/imager/releases) — the easiest way to download and flash Armbian to your SD card or USB drive. Available for Linux, macOS, and Windows.
-
-## Quick Start
-
-```bash
-git clone https://github.com/armbian/build
-cd build
-./compile.sh
-```
-
-<a href="#how-to-build-an-image-or-a-kernel"><img src=".github/README.gif" alt="Build demonstration" width="100%"></a>
-
-## Build Host Requirements
-
-### Hardware
-- **RAM:** ≥8GB (less with `KERNEL_BTF=no`)
-- **Disk:** ~50GB free space
-- **Architecture:** x86_64, aarch64, or riscv64
-
-### Operating System
-- **Native builds:** Armbian or Ubuntu 24.04 (Noble)
-- **Containerized:** Any Docker-capable Linux
-- **Windows:** WSL2 with Armbian/Ubuntu 24.04
-
-### Software
-- Superuser privileges (`sudo` or root)
-- Up-to-date system (outdated Docker or other tools can cause failures)
-
-## Resources
-
-- **[Documentation](https://docs.armbian.com/Developer-Guide_Overview/)** — Comprehensive guides for building, configuring, and customizing
-- **[Website](https://www.armbian.com)** — News, features, and board information
-- **[Blog](https://blog.armbian.com)** — Development updates and technical articles
-- **[Forums](https://forum.armbian.com)** — Community support and discussions
-
-## Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting issues, submitting changes, and contributing code.
-
-## Support
-
-### Community Forums
-Get help from users and contributors on troubleshooting, configuration, and development.
-👉 [forum.armbian.com](https://forum.armbian.com)
-
-### Real-time Chat
-Join discussions with developers and community members on IRC or Discord.
-👉 [Community Chat](https://docs.armbian.com/Community_IRC/)
-
-### Paid Consultation
-For commercial projects, guaranteed response times, or advanced needs, paid support is available from Armbian maintainers.
-👉 [Contact us](https://www.armbian.com/contact)
-
-## Contributors
-
-Thank you to everyone who has contributed to Armbian!
-
-<a href="https://github.com/armbian/build/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=armbian/build" />
-</a>
-
-## Armbian Partners
-
-Our [partnership program](https://forum.armbian.com/subscriptions) supports Armbian's development and community. Learn more about [our Partners](https://armbian.com/partners).
