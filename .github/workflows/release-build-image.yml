@@ -29,7 +29,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ github.event.release.tag_name }}
-          artifacts: "output/images/*"
+          artifacts: "output/images/*.img.xz,output/images/*.sha"
           allowUpdates: true
           removeArtifacts: false
           replacesArtifacts: true
