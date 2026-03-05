@@ -1,0 +1,43 @@
+name: "Release: Build and publish image"
+run-name: "Build ip-terminal image for release ${{ github.event.release.tag_name }}"
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build Armbian image
+    runs-on: ubuntu-24.04-arm
+
+    permissions:
+      contents: write   # required to upload release assets
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Docker
+        uses: docker/setup-docker-action@v4
+
+      - name: Build ip-terminal image
+        run: bash build.sh
+
+      - name: Upload image to release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          artifacts: "output/images/*"
+          allowUpdates: true
+          removeArtifacts: false
+          replacesArtifacts: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            Armbian ip-terminal image built from tag `${{ github.event.release.tag_name }}`.
+
+            Board: Raspberry Pi 4 (`rpi4b`)
+            Kernel branch: `current`
+            Release: `trixie`
