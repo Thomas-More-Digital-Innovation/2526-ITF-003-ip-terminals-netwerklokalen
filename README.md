@@ -23,3 +23,4 @@ The fork is modified to:
     - And more... see the script for details.
 - Read the [Armbian build framework documentation](https://docs.armbian.com/Developer-Guide_Overview/) for more details.
 
+- Enable I2C in the image by default, this is done by setting "dtparam=i2c_arm=on" in the file "config/sources/families/bcm2711.conf"
