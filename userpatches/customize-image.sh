@@ -212,7 +212,8 @@ rm -f /etc/ssh/ssh_host_*
 cat <<'EOF' > /etc/systemd/system/first-boot-setup.service
 [Unit]
 Description=First Boot: Generate SSH Host Keys and Enable Overlayroot
-After=local-fs.target
+After=network-online.target
+Wants=network-online.target
 ConditionPathExists=/etc/first-boot-pending
 
 [Service]
@@ -234,6 +235,8 @@ rm -f /etc/ssh/ssh_host_*
 # Regenerate unique SSH host keys for this device
 ssh-keygen -A
 
+cat /etc/ssh/ssh_host_ed25519_key.pub > /etc/ssh_host_ed25519_key.pub
+
 # Enable overlayroot for all subsequent boots
 cat <<CONF > /etc/overlayroot.conf
 overlayroot="tmpfs"
@@ -244,6 +247,7 @@ CONF
 rm -f /etc/first-boot-pending
 
 # Schedule a reboot to activate overlayroot (--no-block lets the service finish cleanly)
+sleep 15
 systemctl reboot --no-block
 EOF
 
