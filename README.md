@@ -22,5 +22,9 @@ The fork is modified to:
     - Installs various network debugging tools
     - And more... see the script for details.
 - Read the [Armbian build framework documentation](https://docs.armbian.com/Developer-Guide_Overview/) for more details.
+- The `build.sh` script:
+    - Removes the `userpatches/overlay` folder and recreates it before each build.
+    - Copies the contents of the `ip-terminal-code` folder to the `userpatches/overlay` folder.
+    - Compiles armbian using the `compile.sh` script with the `ip-terminal` configuration.
 
 - Enable I2C in the image by default, this is done by setting "dtparam=i2c_arm=on" in the file "config/sources/families/bcm2711.conf"

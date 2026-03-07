@@ -2,6 +2,14 @@
 
 # Start date
 START_DATE=$(date +%s)
+
+# Remove everything from userpatches/overlay
+rm -rf userpatches/overlay/
+mkdir -p userpatches/overlay
+
+# Copy directory ip-terminal-code to userpatches/overlay
+cp -r ip-terminal-code/* userpatches/overlay/
+
 ./compile.sh ip-terminal
 # End date
 END_DATE=$(date +%s)
