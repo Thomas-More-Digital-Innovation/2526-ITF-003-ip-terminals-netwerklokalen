@@ -165,5 +165,41 @@ cat <<EOF > /etc/systemd/resolved.conf
 DNS=${DEFAULT_DNS}
 EOF
 
+# 'config' alias – activates /opt/.venv and launches main.py --tui
+cat <<'EOF' > /etc/profile.d/config-alias.sh
+alias config='/opt/.venv/bin/python /opt/main.py --tui'
+EOF
+chmod +x /etc/profile.d/config-alias.sh
+
+# Show a welcome banner on login for cisco and root
+cat <<'EOF' > /etc/profile.d/welcome.sh
+# Only show for interactive logins by cisco or root
+case "$-" in
+  *i*) ;;
+  *) return ;;
+esac
+IFACE="end0"
+IP_ADDR=$(ip -4 addr show "$IFACE" 2>/dev/null | awk '/inet / {print $2}' | head -1)
+[ -z "$IP_ADDR" ] && IP_ADDR="(not configured)"
+GW=$(ip route show default 2>/dev/null | awk '/default/ {print $3}' | head -1)
+[ -z "$GW" ] && GW="(none)"
+DNS=$(resolvectl status 2>/dev/null | awk '/DNS Servers/ {print $3; exit}')
+[ -z "$DNS" ] && DNS=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)
+[ -z "$DNS" ] && DNS="(none)"
+printf '\n'
+printf '╔══════════════════════════════════════════╗\n'
+printf '║           IP Terminal – Welcome          ║\n'
+printf '╚══════════════════════════════════════════╝\n'
+printf '  IP        : %s\n' "$IP_ADDR"
+printf '  Gateway   : %s\n' "$GW"
+printf '  DNS       : %s\n' "$DNS"
+printf '\n'
+printf '  Type "config" to change IP address, prefix, gateway or DNS\n'
+printf '\n'
+
+EOF
+chmod +x /etc/profile.d/welcome.sh
+
 # Remove bash history
 rm -f /root/.bash_history
+rm -f /home/cisco/.bash_history
