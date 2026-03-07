@@ -235,8 +235,6 @@ rm -f /etc/ssh/ssh_host_*
 # Regenerate unique SSH host keys for this device
 ssh-keygen -A
 
-cat /etc/ssh/ssh_host_ed25519_key.pub > /etc/ssh_host_ed25519_key.pub
-
 # Enable overlayroot for all subsequent boots
 cat <<CONF > /etc/overlayroot.conf
 overlayroot="tmpfs"
