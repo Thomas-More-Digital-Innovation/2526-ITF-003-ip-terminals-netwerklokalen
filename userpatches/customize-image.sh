@@ -133,7 +133,6 @@ apt-get install traceroute # traceroute
 apt-get install -y netcat-traditional # netcat
 apt-get install -y telnet # telnet
 apt-get install -y nmap # nmap
-apt-get install -y tcpdump # tcpdump
 
 # Set static IP using NetworkManager
 mkdir -p /etc/NetworkManager/system-connections
@@ -250,6 +249,15 @@ printf '  Gateway   : %s\n' "$GW"
 printf '  DNS       : %s\n' "$DNS"
 printf '\n'
 printf '  Type "config" to change IP address, prefix, gateway or DNS\n'
+printf '\n'
+printf '  Available tools:\n'
+printf '    ip neigh show  	display ARP table\n'
+printf '    ping         	send ICMP echo requests\n'
+printf '    traceroute   	trace packet route to host\n'
+printf '    nslookup     	query DNS records\n'
+printf '    dig          	DNS lookup utility\n'
+printf '    nc           	netcat – TCP/UDP connections\n'
+printf '    telnet       	telnet client\n'
 printf '\n'
 
 EOF
