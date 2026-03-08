@@ -106,46 +106,24 @@ def apply_settings(field):
         cidr = f"{octets_str(ip_octets)}/{subnet_prefix}"
         subprocess.run(
             ["nmcli", "connection", "modify", CONNECTION_NAME, "ipv4.addresses", cidr],
-            check=True,
+            check=True, capture_output=True,
         )
-        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True)
+        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
 
     elif field == 2:
         subprocess.run(
             ["nmcli", "connection", "modify", CONNECTION_NAME,
              "ipv4.gateway", octets_str(gateway_octets)],
-            check=True,
+            check=True, capture_output=True,
         )
-        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True)
+        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
 
     else:  # DNS
-        dns_str   = octets_str(dns_octets)
-        conf_lines = []
-        try:
-            with open("/etc/systemd/resolved.conf") as f:
-                conf_lines = f.readlines()
-        except FileNotFoundError:
-            pass
-
-        in_resolve  = False
-        dns_written = False
-        new_lines   = []
-        for line in conf_lines:
-            if line.strip() == "[Resolve]":
-                in_resolve = True
-            if in_resolve and line.strip().startswith("DNS="):
-                new_lines.append(f"DNS={dns_str}\n")
-                dns_written = True
-            else:
-                new_lines.append(line)
-        if not dns_written:
-            if not any(l.strip() == "[Resolve]" for l in new_lines):
-                new_lines.insert(0, "[Resolve]\n")
-            new_lines.append(f"DNS={dns_str}\n")
-
-        with open("/etc/systemd/resolved.conf", "w") as f:
-            f.writelines(new_lines)
-        subprocess.run(["systemctl", "restart", "systemd-resolved"], check=True)
+        dns_str = octets_str(dns_octets)
+        subprocess.run(
+            ["sudo", "/usr/local/sbin/set-dns.sh", dns_str],
+            check=True, capture_output=True,
+        )
 
 
 # ---------------------------------------------------------------------------

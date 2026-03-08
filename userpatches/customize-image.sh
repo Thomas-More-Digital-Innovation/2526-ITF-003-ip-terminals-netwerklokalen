@@ -68,6 +68,49 @@ cisco ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/reboot, /sbin/poweroff, /sbin/ha
 EOF
 chmod 440 /etc/sudoers.d/cisco-power
 
+# Privileged helper: lets the 'cisco' user update DNS via systemd-resolved
+# Input is strictly validated inside the script before any file is written.
+cat <<'SCRIPT' > /usr/local/sbin/set-dns.sh
+#!/bin/bash
+# Usage (via sudo only): set-dns.sh <ipv4-address>
+set -e
+
+DNS="$1"
+
+# Validate: four dotted-decimal octets
+if [[ ! "$DNS" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    echo "set-dns: invalid address '${DNS}'" >&2
+    exit 1
+fi
+IFS='.' read -ra _PARTS <<< "$DNS"
+for _p in "${_PARTS[@]}"; do
+    if (( _p < 0 || _p > 255 )); then
+        echo "set-dns: octet out of range in '${DNS}'" >&2
+        exit 1
+    fi
+done
+
+CONF=/etc/systemd/resolved.conf
+if grep -q '^\[Resolve\]' "$CONF" 2>/dev/null; then
+    if grep -q '^DNS=' "$CONF"; then
+        sed -i "s/^DNS=.*/DNS=${DNS}/" "$CONF"
+    else
+        sed -i '/^\[Resolve\]/a DNS='''"$DNS" "$CONF"
+    fi
+else
+    printf '[Resolve]\nDNS=%s\n' "$DNS" > "$CONF"
+fi
+
+systemctl restart systemd-resolved
+SCRIPT
+chmod 700 /usr/local/sbin/set-dns.sh
+
+# Allow 'cisco' to call the DNS helper without a password
+cat <<EOF > /etc/sudoers.d/cisco-dns
+cisco ALL=(ALL) NOPASSWD: /usr/local/sbin/set-dns.sh
+EOF
+chmod 440 /etc/sudoers.d/cisco-dns
+
 # Wrapper scripts so the user can type 'shutdown' / 'reboot' directly (no sudo prefix)
 cat <<'WRAPPER' > /usr/local/bin/shutdown
 #!/bin/bash
