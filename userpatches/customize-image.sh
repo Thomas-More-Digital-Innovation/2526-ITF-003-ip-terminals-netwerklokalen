@@ -27,7 +27,7 @@ DEFAULT_DNS="1.1.1.1"
 
 # Update and install your custom packages
 apt-get update
-apt-get install -y overlayroot btop
+apt-get install -y overlayroot btop polkitd
 
 # Configure Immutability (overlayroot)
 # This makes the root partition read-only and uses RAM for writes.
@@ -112,6 +112,17 @@ method=ignore
 EOF
 
 chmod 600 /etc/NetworkManager/system-connections/static-end0.nmconnection
+
+# Allow 'cisco' user to manage NetworkManager connections (e.g. nmcli) without root
+mkdir -p /etc/polkit-1/rules.d
+cat <<'EOF' > /etc/polkit-1/rules.d/50-allow-cisco-network.rules
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 &&
+        subject.user === "cisco") {
+        return polkit.Result.YES;
+    }
+});
+EOF
 
 # Install i2c-tools
 apt-get install -y i2c-tools
