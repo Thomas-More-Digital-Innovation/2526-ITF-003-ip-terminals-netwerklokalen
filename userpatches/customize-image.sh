@@ -244,8 +244,12 @@ CONF
 # Remove the trigger file so this service never runs again
 rm -f /etc/first-boot-pending
 
-# Schedule a reboot to activate overlayroot (--no-block lets the service finish cleanly)
-sleep 15
+# Flush all writes to disk before rebooting.
+# sync alone is not enough — cheap SD cards often don't implement the FLUSH_CACHE
+# command properly, so the controller may still be writing to NAND after sync returns.
+# A short sleep gives the hardware time to finish.
+sync
+sleep 5
 systemctl reboot --no-block
 EOF
 
