@@ -31,8 +31,9 @@ apt-get install -y overlayroot btop
 
 # Configure Immutability (overlayroot)
 # This makes the root partition read-only and uses RAM for writes.
+# overlayroot is disabled until first-boot setup completes
 cat <<EOF > /etc/overlayroot.conf
-overlayroot="tmpfs"
+overlayroot=""
 overlayroot_cfgmnt="disabled"
 EOF
 
@@ -203,3 +204,58 @@ chmod +x /etc/profile.d/welcome.sh
 # Remove bash history
 rm -f /root/.bash_history
 rm -f /home/cisco/.bash_history
+
+# Remove SSH host keys from image (unique keys will be generated on first boot per device)
+rm -f /etc/ssh/ssh_host_*
+
+# Create first-boot SSH key generation + overlayroot activation service
+cat <<'EOF' > /etc/systemd/system/first-boot-setup.service
+[Unit]
+Description=First Boot: Generate SSH Host Keys and Enable Overlayroot
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/first-boot-pending
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/first-boot-setup.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat <<'EOF' > /usr/local/sbin/first-boot-setup.sh
+#!/bin/bash
+set -e
+
+# Remove any pre-existing (image-baked) SSH host keys
+rm -f /etc/ssh/ssh_host_*
+
+# Regenerate unique SSH host keys for this device
+ssh-keygen -A
+
+# Enable overlayroot for all subsequent boots
+cat <<CONF > /etc/overlayroot.conf
+overlayroot="tmpfs"
+overlayroot_cfgmnt="disabled"
+CONF
+
+# Remove the trigger file so this service never runs again
+rm -f /etc/first-boot-pending
+
+# Flush all writes to disk before rebooting.
+# sync alone is not enough — cheap SD cards often don't implement the FLUSH_CACHE
+# command properly, so the controller may still be writing to NAND after sync returns.
+# A short sleep gives the hardware time to finish.
+sync
+sleep 5
+systemctl reboot --no-block
+EOF
+
+chmod +x /usr/local/sbin/first-boot-setup.sh
+
+# Create the trigger file that activates the first-boot service
+touch /etc/first-boot-pending
+
+systemctl enable first-boot-setup.service
