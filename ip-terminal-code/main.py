@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import ipaddress
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ ip_octets      = [192, 168, 1, 1]
 subnet_prefix  = 16                 # CIDR prefix length (0-32)
 gateway_octets = [192, 168, 1, 1]
 dns_octets     = [1,   1,   1, 1]
+use_dhcp       = False              # True = ipv4.method auto
 
 MENU_OPTIONS    = ["IP address", "Subnet prefix", "Gateway", "DNS"]
 MENU_COUNT      = len(MENU_OPTIONS)
@@ -51,9 +53,25 @@ def field_octets(field):
 
 def field_value_str(field):
     """Human-readable current value for a field index."""
+    if field == 0:
+        return "DHCP" if use_dhcp else octets_str(ip_octets)
     if field == 1:
-        return f"/{subnet_prefix}"
-    return octets_str(field_octets(field))
+        return "DHCP" if use_dhcp else f"/{subnet_prefix}"
+    if field == 2:
+        return "DHCP" if use_dhcp else octets_str(gateway_octets)
+    return octets_str(dns_octets)  # field 3: DNS
+
+
+def auto_gateway_from_ip():
+    """Set gateway_octets to the first host address (network + 1) of the current subnet."""
+    try:
+        network = ipaddress.IPv4Network(
+            f"{octets_str(ip_octets)}/{subnet_prefix}", strict=False
+        )
+        gw = network.network_address + 1
+        gateway_octets[:] = list(gw.packed)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +80,7 @@ def field_value_str(field):
 
 def get_network_settings():
     """Populate shared state from nmcli / systemd-resolved."""
-    global subnet_prefix
+    global subnet_prefix, use_dhcp
 
     try:
         result = subprocess.run(
@@ -99,24 +117,85 @@ def get_network_settings():
     except Exception:
         pass
 
+    try:
+        result = subprocess.run(
+            ["nmcli", "-g", "ipv4.method", "connection", "show", CONNECTION_NAME],
+            capture_output=True, text=True, check=True,
+        )
+        use_dhcp = result.stdout.strip() == "auto"
+    except Exception:
+        pass
+
+
+def get_live_ip():
+    """Return the currently active IPv4 address (DHCP lease or configured static)."""
+    try:
+        result = subprocess.run(
+            ["nmcli", "-g", "IP4.ADDRESS", "connection", "show", CONNECTION_NAME],
+            capture_output=True, text=True, check=True,
+        )
+        addr = result.stdout.strip().split("\n")[0]
+        if addr and "/" in addr:
+            return addr.split("/")[0]
+        return addr or "No IP assigned"
+    except Exception:
+        return "Unknown"
+
+
+def apply_all_settings():
+    """Apply IP/prefix, gateway and DNS all at once."""
+    # 1. IP address + prefix (or DHCP)
+    if use_dhcp:
+        subprocess.run(
+            ["nmcli", "connection", "modify", CONNECTION_NAME,
+             "ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", ""],
+            check=True, capture_output=True,
+        )
+    else:
+        cidr = f"{octets_str(ip_octets)}/{subnet_prefix}"
+        subprocess.run(
+            ["nmcli", "connection", "modify", CONNECTION_NAME,
+             "ipv4.method", "manual",
+             "ipv4.addresses", cidr,
+             "ipv4.gateway", octets_str(gateway_octets)],
+            check=True, capture_output=True,
+        )
+    subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
+
+    # 2. DNS
+    dns_str = octets_str(dns_octets)
+    subprocess.run(
+        ["sudo", "/usr/local/sbin/set-dns.sh", dns_str],
+        check=True, capture_output=True,
+    )
+
 
 def apply_settings(field):
     """Apply the current value of *field* via nmcli / systemd-resolved."""
     if field in (0, 1):
-        cidr = f"{octets_str(ip_octets)}/{subnet_prefix}"
-        subprocess.run(
-            ["nmcli", "connection", "modify", CONNECTION_NAME, "ipv4.addresses", cidr],
-            check=True, capture_output=True,
-        )
+        if use_dhcp:
+            subprocess.run(
+                ["nmcli", "connection", "modify", CONNECTION_NAME,
+                 "ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", ""],
+                check=True, capture_output=True,
+            )
+        else:
+            cidr = f"{octets_str(ip_octets)}/{subnet_prefix}"
+            subprocess.run(
+                ["nmcli", "connection", "modify", CONNECTION_NAME,
+                 "ipv4.method", "manual", "ipv4.addresses", cidr],
+                check=True, capture_output=True,
+            )
         subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
 
-    elif field == 2:
-        subprocess.run(
-            ["nmcli", "connection", "modify", CONNECTION_NAME,
-             "ipv4.gateway", octets_str(gateway_octets)],
-            check=True, capture_output=True,
-        )
-        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
+    elif field == 2:  # Gateway (static only – no-op in DHCP mode)
+        if not use_dhcp:
+            subprocess.run(
+                ["nmcli", "connection", "modify", CONNECTION_NAME,
+                 "ipv4.gateway", octets_str(gateway_octets)],
+                check=True, capture_output=True,
+            )
+            subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
 
     else:  # DNS
         dns_str = octets_str(dns_octets)
@@ -132,7 +211,7 @@ def apply_settings(field):
 
 def run_hardware():
     """Main loop for the physical rotary-encoder + I2C-LCD interface."""
-    global subnet_prefix
+    global subnet_prefix, use_dhcp
 
     import RPi.GPIO as GPIO
     from RPLCD.i2c import CharLCD
@@ -144,11 +223,18 @@ def run_hardware():
 
     lcd = CharLCD("PCF8574", 0x27, cols=16, rows=2)
 
+    HW_MENU       = ["IP address", "Subnet prefix", "Gateway", "DNS", "Apply"]
+    HW_MENU_COUNT = len(HW_MENU)
+    IP_SUBMENU    = ["Enable DHCP", "View IP", "Set static IP", "<- Back"]
+
     # Local UI state
-    mode             = "menu"
+    mode             = "menu"   # "menu" | "ip_mode" | "view_ip" | "edit"
     menu_index       = 0
-    edit_field       = 0
-    state_index      = 0
+    edit_field       = 0        # field index into MENU_OPTIONS (0-3)
+    state_index      = 0        # octet being edited (0-3)
+    ip_mode_index    = 0
+    live_ip          = [""]
+    edit_return_mode = "menu"
     encoder_pulses   = 0
     PULSES_PER_STEP  = 2
 
@@ -162,9 +248,15 @@ def run_hardware():
         lcd.clear()
         time.sleep(0.002)  # HD44780 needs ~1.52 ms after clear
         if mode == "menu":
-            write_row(0, "Select field:")
-            write_row(1, f"> {MENU_OPTIONS[menu_index]}")
-        else:
+            write_row(0, "Select:")
+            write_row(1, f"> {HW_MENU[menu_index]}")
+        elif mode == "ip_mode":
+            write_row(0, "IP address:")
+            write_row(1, f"> {IP_SUBMENU[ip_mode_index]}")
+        elif mode == "view_ip":
+            write_row(0, "Current IP:")
+            write_row(1, live_ip[0][:16])
+        else:  # edit
             labels = {0: "Edit IP", 1: "Edit prefix", 2: "Edit GW", 3: "Edit DNS"}
             write_row(0, labels[edit_field])
             if edit_field == 1:
@@ -174,11 +266,11 @@ def run_hardware():
                 parts[state_index] = f">{parts[state_index]}"
                 write_row(1, ".".join(parts))
 
-    def do_apply(ef):
+    def do_apply_all():
         lcd.clear()
         lcd.write_string("Applying...     ")
         try:
-            apply_settings(ef)
+            apply_all_settings()
             lcd.clear()
             lcd.write_string("Done!           ")
             time.sleep(2)
@@ -228,9 +320,12 @@ def run_hardware():
                 encoder_pulses = 0
 
                 if mode == "menu":
-                    menu_index = (menu_index + direction) % MENU_COUNT
-                    print(f"Menu: {MENU_OPTIONS[menu_index]}")
-                else:
+                    menu_index = (menu_index + direction) % HW_MENU_COUNT
+                    print(f"Menu: {HW_MENU[menu_index]}")
+                elif mode == "ip_mode":
+                    ip_mode_index = (ip_mode_index + direction) % len(IP_SUBMENU)
+                    print(f"IP submenu: {IP_SUBMENU[ip_mode_index]}")
+                else:  # edit
                     if edit_field == 1:
                         subnet_prefix = max(0, min(32, subnet_prefix + direction))
                         print(f"Subnet prefix: /{subnet_prefix}")
@@ -245,17 +340,54 @@ def run_hardware():
             # Button press (active-low)
             if sw_state != last_sw_state and sw_state == 0:
                 if mode == "menu":
-                    get_network_settings()
-                    edit_field  = menu_index
-                    state_index = 0
-                    mode        = "edit"
-                    print(f"Editing: {MENU_OPTIONS[edit_field]}")
-                else:
-                    if edit_field == 1 or state_index == 3:
-                        print(f"Applying: {MENU_OPTIONS[edit_field]}")
-                        do_apply(edit_field)
+                    if menu_index == HW_MENU_COUNT - 1:  # Apply
+                        print("Applying all settings")
+                        do_apply_all()
+                    else:
+                        edit_field = menu_index
+                        if edit_field == 0:  # IP address → show DHCP/Static submenu
+                            ip_mode_index = 0 if use_dhcp else 1
+                            mode = "ip_mode"
+                            print("IP mode submenu")
+                        elif edit_field in (1, 2) and use_dhcp:
+                            print(f"{HW_MENU[edit_field]} disabled in DHCP mode")
+                            write_row(0, "Disabled in")
+                            write_row(1, "DHCP mode")
+                            time.sleep(2)
+                        else:
+                            state_index = 0
+                            edit_return_mode = "menu"
+                            mode = "edit"
+                            print(f"Editing: {MENU_OPTIONS[edit_field]}")
+                elif mode == "ip_mode":
+                    if ip_mode_index == 0:  # Enable DHCP
+                        use_dhcp = True
                         mode = "menu"
-                        print("Back to menu")
+                        print("DHCP selected — back to main menu")
+                    elif ip_mode_index == 1:  # View IP
+                        live_ip[0] = get_live_ip()
+                        print(f"Current IP: {live_ip[0]}")
+                        mode = "view_ip"
+                    elif ip_mode_index == 2:  # Set static IP
+                        use_dhcp = False
+                        state_index = 0
+                        edit_return_mode = "ip_mode"
+                        mode = "edit"
+                        print("Static IP — editing octets")
+                    else:  # ← Back
+                        mode = "menu"
+                        print("Back to main menu")
+                elif mode == "view_ip":
+                    mode = "ip_mode"  # any press returns to submenu
+                    print("Back to IP submenu")
+                else:  # edit
+                    if edit_field == 1 or state_index == 3:
+                        if edit_field in (0, 1):
+                            auto_gateway_from_ip()
+                            print(f"Auto-gateway set to: {octets_str(gateway_octets)}")
+                        mode = edit_return_mode
+                        edit_return_mode = "menu"
+                        print(f"Back to {mode}")
                     else:
                         state_index += 1
                         print(f"Editing octet {state_index + 1}")
@@ -289,7 +421,7 @@ def run_tui():
     import curses
 
     def tui_main(stdscr):
-        global subnet_prefix
+        global subnet_prefix, use_dhcp
 
         curses.curs_set(0)
         curses.start_color()
@@ -429,12 +561,11 @@ def run_tui():
         def edit_prefix():
             """Edit the subnet prefix length with direct keyboard entry."""
             global subnet_prefix
-            current = str(subnet_prefix)
-            error   = ""
+            error = ""
             while True:
-                row, col = draw_edit_screen(MENU_OPTIONS[1], "Prefix length /",
-                                            current, error)
-                text, confirmed = read_line(row, col, initial=current,
+                prompt = f"Prefix length (cur:/{subnet_prefix}) /"
+                row, col = draw_edit_screen(MENU_OPTIONS[1], prompt, "", error)
+                text, confirmed = read_line(row, col, initial="",
                                             allowed="0123456789", max_len=2)
                 if not confirmed:
                     return False
@@ -445,8 +576,7 @@ def run_tui():
                     subnet_prefix = val
                     return True
                 except ValueError:
-                    error   = f"Invalid prefix '{text}' — enter 0..32"
-                    current = text
+                    error = f"Invalid prefix '{text}' — enter 0..32"
 
         def edit_octet_field(field):
             """Edit an IPv4 address with direct keyboard entry (e.g. 192.168.1.1)."""
@@ -472,6 +602,75 @@ def run_tui():
                     error   = f"Invalid address '{text}' — use X.X.X.X (0-255)"
                     current = text
 
+        def view_ip_screen():
+            """Show the currently active IP address. Any key returns."""
+            ip = get_live_ip()
+            stdscr.erase()
+            stdscr.addstr(0, 0, "  Current IP address",
+                          curses.color_pair(2) | curses.A_BOLD)
+            hline(1)
+            stdscr.addstr(3, 4, "Active IP:")
+            try:
+                stdscr.addstr(3, 15, ip, curses.A_BOLD)
+            except curses.error:
+                pass
+            hline(5)
+            stdscr.addstr(6, 0, "  Any key to go back")
+            stdscr.refresh()
+            stdscr.timeout(-1)
+            stdscr.getch()
+            stdscr.timeout(100)
+
+        def edit_ip_address():
+            """Show IP submenu (Enable DHCP / View IP / Set static IP / ← Back)."""
+            global use_dhcp
+            IP_SUBMENU = ["Enable DHCP", "View IP", "Set static IP", "<- Back"]
+            sel = 0
+            stdscr.timeout(-1)
+            try:
+                while True:
+                    stdscr.erase()
+                    stdscr.addstr(0, 0, "  IP address",
+                                  curses.color_pair(2) | curses.A_BOLD)
+                    hline(1)
+                    for idx, label in enumerate(IP_SUBMENU):
+                        attr = curses.color_pair(1) if idx == sel else curses.A_NORMAL
+                        try:
+                            stdscr.addstr(3 + idx, 4, label.ljust(24), attr)
+                        except curses.error:
+                            pass
+                    hline(3 + len(IP_SUBMENU))
+                    stdscr.addstr(4 + len(IP_SUBMENU), 0,
+                                  "  ↑/↓ Select   Enter Confirm   Esc Back")
+                    stdscr.refresh()
+                    key = stdscr.getch()
+                    if key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
+                        if sel == 0:  # Enable DHCP
+                            use_dhcp = True
+                            return False  # return to main menu
+                        elif sel == 1:  # View IP
+                            stdscr.timeout(100)
+                            view_ip_screen()
+                            stdscr.timeout(-1)
+                            # loop back to submenu
+                        elif sel == 2:  # Set static IP
+                            use_dhcp = False
+                            stdscr.timeout(100)
+                            if edit_octet_field(0):
+                                auto_gateway_from_ip()
+                            stdscr.timeout(-1)
+                            # loop back to submenu
+                        else:  # ← Back
+                            return False
+                    elif key == 27:  # Esc
+                        return False
+                    elif key == curses.KEY_UP:
+                        sel = (sel - 1) % len(IP_SUBMENU)
+                    elif key == curses.KEY_DOWN:
+                        sel = (sel + 1) % len(IP_SUBMENU)
+            finally:
+                stdscr.timeout(100)
+
         # ---- main event loop ----
 
         while True:
@@ -487,16 +686,26 @@ def run_tui():
                 status_msg     = ""
 
             elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
-                if selected_field == 1:
-                    edit_prefix()
+                if selected_field == 0:
+                    edit_ip_address()
+                elif selected_field == 1:
+                    if use_dhcp:
+                        status_msg = "Disabled in DHCP mode"
+                        status_ok  = False
+                    elif edit_prefix():
+                        auto_gateway_from_ip()
+                elif selected_field == 2 and use_dhcp:
+                    status_msg = "Disabled in DHCP mode"
+                    status_ok  = False
                 else:
                     edit_octet_field(selected_field)
-                status_msg = ""
+                if not (selected_field in (1, 2) and use_dhcp):
+                    status_msg = ""
 
             elif key in (ord("a"), ord("A")):
                 try:
-                    apply_settings(selected_field)
-                    status_msg = f"Applied: {MENU_OPTIONS[selected_field]}"
+                    apply_all_settings()
+                    status_msg = "Applied settings successfully."
                     status_ok  = True
                 except Exception as exc:
                     status_msg = f"Error: {exc}"
