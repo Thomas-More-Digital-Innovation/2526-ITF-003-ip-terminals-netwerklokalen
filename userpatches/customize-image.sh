@@ -311,7 +311,7 @@ rm -f /etc/first-boot-pending
 # command properly, so the controller may still be writing to NAND after sync returns.
 # A short sleep gives the hardware time to finish.
 sync
-sleep 5
+sleep 15
 systemctl reboot --no-block
 EOF
 
