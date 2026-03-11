@@ -4,7 +4,7 @@ IP Terminal Configurator
 
 Two operating modes, selected at launch:
   (default)  Hardware mode – rotary encoder + I2C LCD (Raspberry Pi)
-  --tui      TUI mode      – ncurses interface for SSH / serial console
+  --tui      TUI mode      – dialog-based interface for SSH / serial console
 
 Usage:
   python3 main.py          # hardware mode
@@ -30,7 +30,7 @@ use_dhcp       = False              # True = ipv4.method auto
 
 MENU_OPTIONS    = ["IP address", "Subnet prefix", "Gateway", "DNS"]
 MENU_COUNT      = len(MENU_OPTIONS)
-CONNECTION_NAME = "static-end0"
+CONNECTION_NAME = "end0"
 
 
 # ---------------------------------------------------------------------------
@@ -417,309 +417,96 @@ def run_hardware():
 # ---------------------------------------------------------------------------
 
 def run_tui():
-    """Launch a curses-based TUI for configuring network settings over SSH."""
-    import curses
+    """Launch a dialog-based TUI for configuring network settings over SSH."""
 
-    def tui_main(stdscr):
-        global subnet_prefix, use_dhcp
+    def dialog(*args):
+        """Run dialog and return (returncode, output).  UI is drawn on the
+        terminal; the selected value / typed text is captured from stderr."""
+        result = subprocess.run(
+            ["dialog"] + list(args),
+            stderr=subprocess.PIPE, text=True,
+        )
+        return result.returncode, result.stderr.strip()
 
-        curses.curs_set(0)
-        curses.start_color()
-        curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_BLACK,  curses.COLOR_CYAN)   # selected row
-        curses.init_pair(2, curses.COLOR_CYAN,   -1)                  # title / labels
-        curses.init_pair(3, curses.COLOR_GREEN,  -1)                  # status: ok
-        curses.init_pair(4, curses.COLOR_RED,    -1)                  # status: error
+    def msgbox(title, text):
+        content_lines = text.splitlines()
+        height = min(len(content_lines) + 6, 40)
+        width  = max(min(max((len(l) for l in content_lines), default=0) + 6, 78), 50)
+        subprocess.run(["dialog", "--title", title, "--msgbox", text, str(height), str(width)])
 
-        stdscr.keypad(True)
-        stdscr.timeout(100)
+    def run_ip_settings():
+        subprocess.run(["nmtui", "edit", CONNECTION_NAME])
+        subprocess.run(["nmcli", "con", "down", CONNECTION_NAME])
+        subprocess.run(["nmtui", "connect", CONNECTION_NAME])
 
-        get_network_settings()
-
-        selected_field = 0
-        status_msg     = ""
-        status_ok      = True
-
-        # ---- drawing helpers ----
-
-        def hline(row):
-            _, w = stdscr.getmaxyx()
+    def view_ips():
+        lines = []
+        for family, field in (("IPv4", "IP4.ADDRESS"), ("IPv6", "IP6.ADDRESS")):
             try:
-                stdscr.addstr(row, 0, "─" * (w - 1))
-            except curses.error:
-                pass
+                result = subprocess.run(
+                    ["nmcli", "-g", field, "connection", "show", CONNECTION_NAME],
+                    capture_output=True, text=True, check=True,
+                )
+                addrs = [
+                    a.strip().replace("\\:", ":")
+                    for raw in result.stdout.strip().splitlines()
+                    for a in raw.split(" | ")
+                    if a.strip() and a.strip() != "--"
+                ]
+                lines.append(f"{family}:")
+                lines.extend(f"  {a}" for a in addrs) if addrs else lines.append("  (none)")
+            except Exception as exc:
+                lines.append(f"{family}: error ({exc})")
+        msgbox("IP Addresses", "\n".join(lines))
 
-        def draw_main():
-            stdscr.erase()
-            h, w = stdscr.getmaxyx()
-
-            title = " IP Terminal Configurator "
-            stdscr.addstr(0, max(0, (w - len(title)) // 2),
-                          title, curses.color_pair(2) | curses.A_BOLD)
-            hline(1)
-
-            for i, label in enumerate(MENU_OPTIONS):
-                val  = field_value_str(i)
-                line = f"  {label:<16}  {val}"
-                attr = curses.color_pair(1) if i == selected_field else curses.A_NORMAL
-                try:
-                    stdscr.addstr(2 + i, 0, line.ljust(w - 1), attr)
-                except curses.error:
-                    pass
-
-            hline(2 + MENU_COUNT)
-            help_row = 3 + MENU_COUNT
-            try:
-                stdscr.addstr(help_row, 0,
-                              "  ↑/↓ Navigate   Enter Edit   a Apply   r Reload   q/Esc Quit")
-            except curses.error:
-                pass
-
-            if status_msg:
-                attr = curses.color_pair(3) if status_ok else curses.color_pair(4)
-                try:
-                    stdscr.addstr(help_row + 2, 0, f"  {status_msg}", attr)
-                except curses.error:
-                    pass
-
-            stdscr.refresh()
-
-        # ---- generic single-line text input ----
-
-        def read_line(row, col, initial="", allowed="0123456789.", max_len=15):
-            """
-            Inline text editor. Returns (text, confirmed).
-            Supports: printable chars, Backspace, Delete, ←/→, Home, End,
-                      Enter (confirm), Esc (cancel).
-            """
-            buf = list(initial)
-            pos = len(buf)
-            curses.curs_set(1)
-            stdscr.timeout(-1)  # blocking while typing
-            try:
-                while True:
-                    text    = "".join(buf)
-                    display = (text + " " * max_len)[:max_len]
-                    try:
-                        stdscr.addstr(row, col, display, curses.A_REVERSE)
-                        stdscr.move(row, col + min(pos, max_len - 1))
-                    except curses.error:
-                        pass
-                    stdscr.refresh()
-
-                    key = stdscr.getch()
-
-                    if key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
-                        return ("".join(buf), True)
-                    elif key == 27:  # Esc
-                        return (initial, False)
-                    elif key in (curses.KEY_BACKSPACE, 127, 8):
-                        if pos > 0:
-                            buf.pop(pos - 1)
-                            pos -= 1
-                    elif key == curses.KEY_DC:
-                        if pos < len(buf):
-                            buf.pop(pos)
-                    elif key == curses.KEY_LEFT:
-                        pos = max(0, pos - 1)
-                    elif key == curses.KEY_RIGHT:
-                        pos = min(len(buf), pos + 1)
-                    elif key == curses.KEY_HOME:
-                        pos = 0
-                    elif key == curses.KEY_END:
-                        pos = len(buf)
-                    elif 32 <= key < 127:
-                        ch = chr(key)
-                        if ch in allowed and len(buf) < max_len:
-                            buf.insert(pos, ch)
-                            pos += 1
-            finally:
-                curses.curs_set(0)
-                stdscr.timeout(100)
-
-        # ---- edit sub-screens ----
-
-        def draw_edit_screen(title, prompt, value_str, error=""):
-            """Render the common edit screen layout. Returns the (row, col) for input."""
-            stdscr.erase()
-            stdscr.addstr(0, 0, f"  Edit: {title}",
-                          curses.color_pair(2) | curses.A_BOLD)
-            hline(1)
-            stdscr.addstr(3, 4, prompt)
-            input_col = 4 + len(prompt) + 1
-            if error:
-                attr = curses.color_pair(4)
-                try:
-                    stdscr.addstr(5, 4, f"  {error}", attr)
-                except curses.error:
-                    pass
-            hline(7)
-            stdscr.addstr(8, 0, "  Type value   Enter Confirm   Esc Cancel")
-            stdscr.refresh()
-            return 3, input_col
-
-        def edit_prefix():
-            """Edit the subnet prefix length with direct keyboard entry."""
-            global subnet_prefix
-            error = ""
-            while True:
-                prompt = f"Prefix length (cur:/{subnet_prefix}) /"
-                row, col = draw_edit_screen(MENU_OPTIONS[1], prompt, "", error)
-                text, confirmed = read_line(row, col, initial="",
-                                            allowed="0123456789", max_len=2)
-                if not confirmed:
-                    return False
-                try:
-                    val = int(text)
-                    if not 0 <= val <= 32:
-                        raise ValueError
-                    subnet_prefix = val
-                    return True
-                except ValueError:
-                    error = f"Invalid prefix '{text}' — enter 0..32"
-
-        def edit_octet_field(field):
-            """Edit an IPv4 address with direct keyboard entry (e.g. 192.168.1.1)."""
-            current = octets_str(field_octets(field))
-            error   = ""
-            while True:
-                row, col = draw_edit_screen(MENU_OPTIONS[field], "Address:",
-                                            current, error)
-                text, confirmed = read_line(row, col, initial=current,
-                                            allowed="0123456789.", max_len=15)
-                if not confirmed:
-                    return False
-                try:
-                    parts = text.strip().split(".")
-                    if len(parts) != 4:
-                        raise ValueError
-                    values = [int(p) for p in parts]
-                    if not all(0 <= v <= 255 for v in values):
-                        raise ValueError
-                    field_octets(field)[:] = values
-                    return True
-                except ValueError:
-                    error   = f"Invalid address '{text}' — use X.X.X.X (0-255)"
-                    current = text
-
-        def view_ip_screen():
-            """Show the currently active IP address. Any key returns."""
-            ip = get_live_ip()
-            stdscr.erase()
-            stdscr.addstr(0, 0, "  Current IP address",
-                          curses.color_pair(2) | curses.A_BOLD)
-            hline(1)
-            stdscr.addstr(3, 4, "Active IP:")
-            try:
-                stdscr.addstr(3, 15, ip, curses.A_BOLD)
-            except curses.error:
-                pass
-            hline(5)
-            stdscr.addstr(6, 0, "  Any key to go back")
-            stdscr.refresh()
-            stdscr.timeout(-1)
-            stdscr.getch()
-            stdscr.timeout(100)
-
-        def edit_ip_address():
-            """Show IP submenu (Enable DHCP / View IP / Set static IP / ← Back)."""
-            global use_dhcp
-            IP_SUBMENU = ["Enable DHCP", "View IP", "Set static IP", "<- Back"]
-            sel = 0
-            stdscr.timeout(-1)
-            try:
-                while True:
-                    stdscr.erase()
-                    stdscr.addstr(0, 0, "  IP address",
-                                  curses.color_pair(2) | curses.A_BOLD)
-                    hline(1)
-                    for idx, label in enumerate(IP_SUBMENU):
-                        attr = curses.color_pair(1) if idx == sel else curses.A_NORMAL
-                        try:
-                            stdscr.addstr(3 + idx, 4, label.ljust(24), attr)
-                        except curses.error:
-                            pass
-                    hline(3 + len(IP_SUBMENU))
-                    stdscr.addstr(4 + len(IP_SUBMENU), 0,
-                                  "  ↑/↓ Select   Enter Confirm   Esc Back")
-                    stdscr.refresh()
-                    key = stdscr.getch()
-                    if key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
-                        if sel == 0:  # Enable DHCP
-                            use_dhcp = True
-                            return False  # return to main menu
-                        elif sel == 1:  # View IP
-                            stdscr.timeout(100)
-                            view_ip_screen()
-                            stdscr.timeout(-1)
-                            # loop back to submenu
-                        elif sel == 2:  # Set static IP
-                            use_dhcp = False
-                            stdscr.timeout(100)
-                            if edit_octet_field(0):
-                                auto_gateway_from_ip()
-                            stdscr.timeout(-1)
-                            # loop back to submenu
-                        else:  # ← Back
-                            return False
-                    elif key == 27:  # Esc
-                        return False
-                    elif key == curses.KEY_UP:
-                        sel = (sel - 1) % len(IP_SUBMENU)
-                    elif key == curses.KEY_DOWN:
-                        sel = (sel + 1) % len(IP_SUBMENU)
-            finally:
-                stdscr.timeout(100)
-
-        # ---- main event loop ----
-
+    def run_dns_settings():
+        current = octets_str(dns_octets)
         while True:
-            draw_main()
-            key = stdscr.getch()
+            rc, text = dialog(
+                "--title", "Edit DNS settings",
+                "--inputbox", "DNS server:", "8", "40", current,
+            )
+            if rc != 0:
+                return
+            try:
+                parts = text.split(".")
+                if len(parts) != 4:
+                    raise ValueError
+                values = [int(p) for p in parts]
+                if not all(0 <= v <= 255 for v in values):
+                    raise ValueError
+                dns_octets[:] = values
+                subprocess.run(
+                    ["sudo", "/usr/local/sbin/set-dns.sh", text],
+                    check=True, capture_output=True,
+                )
+                msgbox("DNS", f"DNS set to {text}")
+                return
+            except ValueError:
+                msgbox("Error", f"Invalid address '{text}'\nUse X.X.X.X (0-255)")
+                current = text
+            except subprocess.CalledProcessError as exc:
+                msgbox("Error", f"Error applying DNS:\n{exc}")
+                return
 
-            if key == curses.KEY_UP:
-                selected_field = (selected_field - 1) % MENU_COUNT
-                status_msg     = ""
-
-            elif key == curses.KEY_DOWN:
-                selected_field = (selected_field + 1) % MENU_COUNT
-                status_msg     = ""
-
-            elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
-                if selected_field == 0:
-                    edit_ip_address()
-                elif selected_field == 1:
-                    if use_dhcp:
-                        status_msg = "Disabled in DHCP mode"
-                        status_ok  = False
-                    elif edit_prefix():
-                        auto_gateway_from_ip()
-                elif selected_field == 2 and use_dhcp:
-                    status_msg = "Disabled in DHCP mode"
-                    status_ok  = False
-                else:
-                    edit_octet_field(selected_field)
-                if not (selected_field in (1, 2) and use_dhcp):
-                    status_msg = ""
-
-            elif key in (ord("a"), ord("A")):
-                try:
-                    apply_all_settings()
-                    status_msg = "Applied settings successfully."
-                    status_ok  = True
-                except Exception as exc:
-                    status_msg = f"Error: {exc}"
-                    status_ok  = False
-
-            elif key in (ord("r"), ord("R")):
-                get_network_settings()
-                status_msg = "Settings reloaded from system."
-                status_ok  = True
-
-            elif key in (ord("q"), ord("Q"), 27):  # q/Q/Esc
-                break
-
-    curses.wrapper(tui_main)
+    get_network_settings()
+    while True:
+        rc, choice = dialog(
+            "--title", "IP Terminal Configurator",
+            "--menu", "Select an option:", "13", "50", "3",
+            "1", "Edit IP settings",
+            "2", "Edit DNS settings",
+            "3", "View IPs",
+        )
+        if rc != 0:
+            break
+        if choice == "1":
+            run_ip_settings()
+        elif choice == "2":
+            run_dns_settings()
+        elif choice == "3":
+            view_ips()
+    subprocess.run(["clear"])
 
 
 # ---------------------------------------------------------------------------
@@ -733,13 +520,13 @@ if __name__ == "__main__":
         epilog=(
             "Modes:\n"
             "  (default)  Hardware – rotary encoder + I2C LCD (Raspberry Pi GPIO)\n"
-            "  --tui      TUI      – ncurses interface for SSH / serial console\n"
+            "  --tui      TUI      – dialog-based interface for SSH / serial console\n"
         ),
     )
     parser.add_argument(
         "--tui",
         action="store_true",
-        help="Run in TUI (ncurses) mode instead of hardware mode.",
+        help="Run in TUI (dialog) mode instead of hardware mode.",
     )
     args = parser.parse_args()
 

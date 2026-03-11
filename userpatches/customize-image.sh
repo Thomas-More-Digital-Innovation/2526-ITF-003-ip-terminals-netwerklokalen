@@ -21,8 +21,8 @@ BUILD_DESKTOP=$4
 DEFAULT_ACCOUND="cisco"
 DEFAULT_PASSWORD="cisco"
 DEFAULT_HOSTNAME="ip-terminal"
-DEFAULT_STATIC_IP="172.16.250.1/16" # Plus prefix!
-DEFAULT_GATEWAY="172.16.0.1"
+DEFAULT_STATIC_IP="192.168.1.58/24" # Plus prefix!
+DEFAULT_GATEWAY="192.168.1.1"
 DEFAULT_DNS="1.1.1.1"
 
 # Update and install your custom packages
@@ -136,9 +136,9 @@ apt-get install -y nmap # nmap
 
 # Set static IP using NetworkManager
 mkdir -p /etc/NetworkManager/system-connections
-cat <<EOF > /etc/NetworkManager/system-connections/static-end0.nmconnection
+cat <<EOF > /etc/NetworkManager/system-connections/end0.nmconnection
 [connection]
-id=static-end0
+id=end0
 type=ethernet
 interface-name=end0
 
@@ -153,7 +153,7 @@ gateway=${DEFAULT_GATEWAY}
 method=ignore
 EOF
 
-chmod 600 /etc/NetworkManager/system-connections/static-end0.nmconnection
+chmod 600 /etc/NetworkManager/system-connections/end0.nmconnection
 
 # Allow 'cisco' user to manage NetworkManager connections (e.g. nmcli) without root
 mkdir -p /etc/polkit-1/rules.d
