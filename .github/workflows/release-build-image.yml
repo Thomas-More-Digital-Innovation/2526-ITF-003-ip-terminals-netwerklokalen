@@ -20,7 +20,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Docker
-        uses: docker/setup-docker-action@v4
+        uses: docker/setup-docker-action@v5
 
       - name: Build ip-terminal image
         run: bash build.sh
