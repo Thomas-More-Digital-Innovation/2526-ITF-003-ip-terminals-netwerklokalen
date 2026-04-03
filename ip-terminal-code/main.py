@@ -265,36 +265,25 @@ def run_hardware():
 
     lcd = ST7735()
 
-    # Load fonts (try environment variable first, then standard paths)
-    font_paths = []
+    # Load fonts (try environment variable first, then fall back to default)
     env_font = os.environ.get("FONT_PATH")
-    if env_font:
-        font_paths.append(env_font)
-
-    font_paths.extend([
-        "/run/current-system/sw/share/fonts/truetype/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    ])
-
     font = ImageFont.load_default()
     title_font = font
     header_font = font
 
-    for path in font_paths:
+    if env_font:
         try:
             # Main font for menu items (increased from default ~8 to 13)
-            font = ImageFont.truetype(path, 13)
+            font = ImageFont.truetype(env_font, 13)
             # Bold/Larger font for titles (15)
-            title_font = ImageFont.truetype(path, 15)
+            title_font = ImageFont.truetype(env_font, 15)
             # Smaller header/footer if needed
-            header_font = ImageFont.truetype(path, 11)
-            print(f"DEBUG: Successfully loaded font: {path}")
-            break
+            header_font = ImageFont.truetype(env_font, 11)
+            print(f"DEBUG: Successfully loaded font from FONT_PATH: {env_font}")
         except Exception as e:
-            continue
+            print(f"DEBUG: Could not load TTF font from FONT_PATH ({env_font}), falling back to default.")
     else:
-        print("DEBUG: Could not load any TTF font, falling back to default.")
+        print("DEBUG: FONT_PATH not set, falling back to default low-resolution font.")
 
     HW_MENU       = ["IPv4 Settings", "DNS Settings", "View IPs"]
     HW_MENU_COUNT = len(HW_MENU)
