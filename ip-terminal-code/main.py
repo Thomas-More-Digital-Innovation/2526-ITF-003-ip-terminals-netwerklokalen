@@ -784,7 +784,7 @@ def run_tui():
         rc, choice = dialog(
             "--title", "IP Terminal Configurator",
             "--menu", "Select an option:", "15", "50", "4",
-            "1", "Edit IPv4 settings",
+            "1", "Edit IP settings",
             "2", "Edit DNS settings",
             "3", "View IPs",
             "4", "Quit",
