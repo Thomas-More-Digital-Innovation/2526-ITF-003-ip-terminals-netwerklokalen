@@ -296,7 +296,7 @@ def run_hardware():
     else:
         print("DEBUG: Could not load any TTF font, falling back to default.")
 
-    HW_MENU       = ["IP settings", "DNS settings", "View IPs"]
+    HW_MENU       = ["IPv4 Settings", "DNS Settings", "View IPs"]
     HW_MENU_COUNT = len(HW_MENU)
     IP_SUBMENU    = ["Mode", "IP Address", "Prefix", "Gateway", "Apply", "<- Back"]
 
@@ -333,7 +333,7 @@ def run_hardware():
                 draw.text((5, y), f"{prefix}{item}", font=font, fill=color)
 
         elif mode == "ip_mode":
-            draw.text((5, 5), "IP Config", font=title_font, fill=COLOR_ACCENT)
+            draw.text((5, 5), "IPv4 Settings", font=title_font, fill=COLOR_ACCENT)
             draw.line((5, 23, 123, 23), fill=COLOR_ACCENT)
             for i, item in enumerate(IP_SUBMENU):
                 y = 28 + i * 16
@@ -443,6 +443,7 @@ def run_hardware():
 
             # Detect edge (button press)
             press_detected = False
+            key3_detected = False
             direction = 0
             back_detected = False
             left_detected = False
@@ -511,13 +512,18 @@ def run_hardware():
                 right_detected = True
                 print("DEBUG: Joystick RIGHT")
 
-            if (current_input["press"] and not last_input["press"]) or \
-               (current_input["key1"] and not last_input["key1"]):
+            if current_input["press"] and not last_input["press"]:
                 press_detected = True
-                print("DEBUG: Joystick PRESS / KEY1")
+                print("DEBUG: Joystick PRESS")
+            if current_input["key1"] and not last_input["key1"]:
+                direction = -1
+                print("DEBUG: KEY1 (UP)")
             if current_input["key2"] and not last_input["key2"]:
-                back_detected = True
-                print("DEBUG: KEY2 (Back)")
+                direction = 1
+                print("DEBUG: KEY2 (DOWN)")
+            if current_input["key3"] and not last_input["key3"]:
+                key3_detected = True
+                print("DEBUG: KEY3 (Quick Action)")
 
             # Action logic
             if direction != 0:
@@ -555,7 +561,7 @@ def run_hardware():
             if press_detected:
                 if mode == "menu":
                     print(f"DEBUG: Menu Select index={menu_index}")
-                    if menu_index == 0: # IP settings
+                    if menu_index == 0: # IPv4 settings
                         get_network_settings()
                         ip_mode_index = 0
                         mode = "ip_mode"
@@ -620,6 +626,57 @@ def run_hardware():
                     else:
                         state_index += 1
                 display_dirty = True
+
+            if key3_detected:
+                if mode == "ip_mode":
+                    if not use_dhcp:
+                        if ip_mode_index == 1: # IP Address quick actions
+                            subnets = [
+                                ([192, 168, 0, 0], 24),
+                                ([172, 16, 0, 0], 16),
+                                ([10, 10, 10, 0], 30),
+                                ([10, 0, 0, 0], 8)
+                            ]
+                            next_match = 0
+                            for i, (addr, pref) in enumerate(subnets):
+                                if list(ip_octets) == addr and subnet_prefix == pref:
+                                    next_match = (i + 1) % len(subnets)
+                                    break
+                            ip_octets[:] = subnets[next_match][0]
+                            subnet_prefix = subnets[next_match][1]
+                            display_dirty = True
+                        elif ip_mode_index == 2: # Prefix quick actions
+                            prefixes = [30, 24, 16, 8]
+                            next_idx = 0
+                            if subnet_prefix in prefixes:
+                                next_idx = (prefixes.index(subnet_prefix) + 1) % len(prefixes)
+                            subnet_prefix = prefixes[next_idx]
+                            display_dirty = True
+
+                elif mode == "edit":
+                    if edit_field == 0: # IP Address quick actions
+                        subnets = [
+                            ([192, 168, 0, 0], 24),
+                            ([172, 16, 0, 0], 16),
+                            ([10, 10, 10, 0], 30),
+                            ([10, 0, 0, 0], 8)
+                        ]
+                        next_match = 0
+                        for i, (addr, pref) in enumerate(subnets):
+                            if list(ip_octets) == addr and subnet_prefix == pref:
+                                next_match = (i + 1) % len(subnets)
+                                break
+                        ip_octets[:] = subnets[next_match][0]
+                        subnet_prefix = subnets[next_match][1]
+                        state_index = 0 # Reset cursor to first octet
+                        display_dirty = True
+                    elif edit_field == 1: # Prefix quick actions
+                        prefixes = [30, 24, 16, 8]
+                        next_idx = 0
+                        if subnet_prefix in prefixes:
+                            next_idx = (prefixes.index(subnet_prefix) + 1) % len(prefixes)
+                        subnet_prefix = prefixes[next_idx]
+                        display_dirty = True
 
             if back_detected:
                 if mode == "ip_mode":
@@ -738,7 +795,7 @@ def run_tui():
         rc, choice = dialog(
             "--title", "IP Terminal Configurator",
             "--menu", "Select an option:", "15", "50", "4",
-            "1", "Edit IP settings",
+            "1", "Edit IPv4 settings",
             "2", "Edit DNS settings",
             "3", "View IPs",
             "4", "Quit",
