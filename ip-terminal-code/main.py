@@ -32,6 +32,14 @@ use_dhcp       = False              # True = ipv4.method auto
 MENU_OPTIONS    = ["IP address", "Subnet prefix", "Gateway", "DNS"]
 MENU_COUNT      = len(MENU_OPTIONS)
 CONNECTION_NAME = "end0"
+ipv6_method     = "auto"            # "auto", "dhcp", "manual", "disabled"
+IPV6_METHODS    = ["auto", "dhcp", "manual", "disabled"]
+IPV6_NAMES      = {
+    "auto": "Auto",
+    "dhcp": "Auto DHCP only",
+    "manual": "Manual",
+    "disabled": "Disabled"
+}
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +89,7 @@ def auto_gateway_from_ip():
 
 def get_network_settings():
     """Populate shared state from nmcli / systemd-resolved."""
-    global subnet_prefix, use_dhcp
+    global subnet_prefix, use_dhcp, ipv6_method
 
     try:
         result = subprocess.run(
@@ -140,6 +148,17 @@ def get_network_settings():
     except Exception as e:
         sys.stderr.write(f"Error in get_network_settings (ipv4.method): {e}\n")
 
+    try:
+        result = subprocess.run(
+            ["nmcli", "-g", "ipv6.method", "connection", "show", CONNECTION_NAME],
+            capture_output=True, text=True, check=True,
+        )
+        meth = result.stdout.strip()
+        if meth in IPV6_METHODS:
+            ipv6_method = meth
+    except Exception as e:
+        sys.stderr.write(f"Error in get_network_settings (ipv6.method): {e}\n")
+
 
 def get_live_ips():
     """Return a list of lines representing currently active IPv4 and IPv6 addresses."""
@@ -174,11 +193,11 @@ def get_live_ips():
 
 def apply_all_settings():
     """Apply IP/prefix, gateway and DNS all at once."""
+    ipv6_args = ["ipv6.method", ipv6_method]
+    if ipv6_method != "manual":
+        ipv6_args += ["ipv6.addresses", "", "ipv6.gateway", "", "ipv6.dns", "", "ipv6.ignore-auto-dns", "no"]
+
     if use_dhcp:
-        # In DHCP mode, we clear addresses/gateway.
-        # For DNS, we respect the current dns_octets if we want a static override.
-        # If we want pure DHCP, we'd clear ipv4.dns and set ignore-auto-dns no.
-        # But our UI always has a DNS value. We'll set it as an override if ignore-auto-dns is yes.
         dns_str = octets_str(dns_octets)
         subprocess.run(
             ["nmcli", "connection", "modify", CONNECTION_NAME,
@@ -186,7 +205,7 @@ def apply_all_settings():
              "ipv4.addresses", "",
              "ipv4.gateway", "",
              "ipv4.dns", dns_str,
-             "ipv4.ignore-auto-dns", "yes"],
+             "ipv4.ignore-auto-dns", "yes"] + ipv6_args,
             check=True, capture_output=True,
         )
     else:
@@ -198,7 +217,7 @@ def apply_all_settings():
              "ipv4.addresses", cidr,
              "ipv4.gateway", octets_str(gateway_octets),
              "ipv4.dns", dns_str,
-             "ipv4.ignore-auto-dns", "yes"],
+             "ipv4.ignore-auto-dns", "yes"] + ipv6_args,
             check=True, capture_output=True,
         )
     subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
@@ -247,7 +266,7 @@ def apply_settings(field):
 # ABCD
 def run_hardware():
     """Main loop for the physical rotary-encoder + I2C-LCD interface."""
-    global subnet_prefix, use_dhcp
+    global subnet_prefix, use_dhcp, ipv6_method
 
     import RPi.GPIO as GPIO
     from PIL import Image, ImageDraw, ImageFont
@@ -285,9 +304,10 @@ def run_hardware():
     else:
         print("DEBUG: FONT_PATH not set, falling back to default low-resolution font.")
 
-    HW_MENU       = ["IPv4 Settings", "DNS Settings", "View IPs"]
+    HW_MENU       = ["IPv4 Settings", "IPv6 Settings", "DNS Settings", "View IPs"]
     HW_MENU_COUNT = len(HW_MENU)
     IP_SUBMENU    = ["Mode", "IP Address", "Prefix", "Gateway", "Apply", "<- Back"]
+    IPV6_SUBMENU  = ["Mode", "Apply", "<- Back"]
 
     # Local UI state
     mode             = "menu"   # "menu" | "ip_mode" | "view_ip" | "edit"
@@ -295,6 +315,7 @@ def run_hardware():
     edit_field       = 0        # field index into MENU_OPTIONS (0-3)
     state_index      = 0        # octet being edited (0-3)
     ip_mode_index    = 0
+    ipv6_mode_index  = 0
     live_ip          = []       # List of (text, color) tuples
     view_ip_scroll   = 0
     edit_return_mode = "menu"
@@ -334,6 +355,20 @@ def run_hardware():
                     display_text = f"Mode: {'DHCP' if use_dhcp else 'Manual'}"
                 elif i in (1, 2, 3) and use_dhcp:
                     color = (100, 100, 100) # Grayed out
+
+                draw.text((5, y), f"{prefix}{display_text}", font=font, fill=color)
+
+        elif mode == "ipv6_mode":
+            draw.text((5, 5), "IPv6 Settings", font=title_font, fill=COLOR_ACCENT)
+            draw.line((5, 23, 123, 23), fill=COLOR_ACCENT)
+            for i, item in enumerate(IPV6_SUBMENU):
+                y = 28 + i * 16
+                prefix = "> " if i == ipv6_mode_index else "  "
+                color = COLOR_HIGHLIGHT if i == ipv6_mode_index else COLOR_TEXT
+
+                display_text = item
+                if i == 0: # Mode
+                    display_text = f"Mode: {IPV6_NAMES.get(ipv6_method, ipv6_method)}"
 
                 draw.text((5, y), f"{prefix}{display_text}", font=font, fill=color)
 
@@ -520,6 +555,8 @@ def run_hardware():
                     menu_index = (menu_index + direction) % HW_MENU_COUNT
                 elif mode == "ip_mode":
                     ip_mode_index = (ip_mode_index + direction) % len(IP_SUBMENU)
+                elif mode == "ipv6_mode":
+                    ipv6_mode_index = (ipv6_mode_index + direction) % len(IPV6_SUBMENU)
                 elif mode == "view_ip":
                     max_scroll = max(0, len(live_ip) - 7)
                     view_ip_scroll = max(0, min(max_scroll, view_ip_scroll + direction))
@@ -536,7 +573,7 @@ def run_hardware():
                     if state_index > 0:
                         state_index -= 1
                         display_dirty = True
-                elif mode in ("edit", "ip_mode", "view_ip"):
+                elif mode in ("edit", "ip_mode", "ipv6_mode", "view_ip"):
                     back_detected = True
 
             if right_detected:
@@ -554,13 +591,17 @@ def run_hardware():
                         get_network_settings()
                         ip_mode_index = 0
                         mode = "ip_mode"
-                    elif menu_index == 1: # DNS settings
+                    elif menu_index == 1: # IPv6 settings
+                        get_network_settings()
+                        ipv6_mode_index = 0
+                        mode = "ipv6_mode"
+                    elif menu_index == 2: # DNS settings
                         get_network_settings()
                         edit_field = 3
                         state_index = 0
                         edit_return_mode = "menu"
                         mode = "edit"
-                    elif menu_index == 2: # View IPs
+                    elif menu_index == 3: # View IPs
                         get_network_settings()
                         raw_list = get_live_ips()
                         import textwrap
@@ -600,6 +641,19 @@ def run_hardware():
                             edit_return_mode = "ip_mode"
                             mode = "edit"
                     elif ip_mode_index == 4: # Apply
+                        do_apply_all()
+                    else: # Back
+                        mode = "menu"
+                elif mode == "ipv6_mode":
+                    print(f"DEBUG: IPv6 Submenu index={ipv6_mode_index}")
+                    if ipv6_mode_index == 0: # Mode selection
+                        # Cycle through IPV6_METHODS but skip "manual"
+                        current_idx = IPV6_METHODS.index(ipv6_method) if ipv6_method in IPV6_METHODS else 0
+                        next_idx = (current_idx + 1) % len(IPV6_METHODS)
+                        if IPV6_METHODS[next_idx] == "manual":
+                            next_idx = (next_idx + 1) % len(IPV6_METHODS)
+                        ipv6_method = IPV6_METHODS[next_idx]
+                    elif ipv6_mode_index == 1: # Apply
                         do_apply_all()
                     else: # Back
                         mode = "menu"
@@ -668,7 +722,7 @@ def run_hardware():
                         display_dirty = True
 
             if back_detected:
-                if mode == "ip_mode":
+                if mode == "ip_mode" or mode == "ipv6_mode":
                     mode = "menu"
                 elif mode == "view_ip":
                     mode = "menu"
