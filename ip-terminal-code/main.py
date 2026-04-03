@@ -722,10 +722,17 @@ def run_tui():
         width  = max(min(max((len(l) for l in content_lines), default=0) + 6, 78), 50)
         subprocess.run(["dialog", "--title", title, "--msgbox", text, str(height), str(width)])
 
+    def infobox(title, text):
+        content_lines = text.splitlines()
+        height = min(len(content_lines) + 6, 40)
+        width  = max(min(max((len(l) for l in content_lines), default=0) + 6, 78), 50)
+        subprocess.run(["dialog", "--title", title, "--infobox", text, str(height), str(width)])
+
     def run_ip_settings():
         subprocess.run(["nmtui", "edit", CONNECTION_NAME])
-        subprocess.run(["nmcli", "con", "down", CONNECTION_NAME])
-        subprocess.run(["nmtui", "connect", CONNECTION_NAME])
+        infobox("Applying", "Applying IP settings...")
+        subprocess.run(["nmcli", "con", "down", CONNECTION_NAME], capture_output=True)
+        subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], capture_output=True)
 
     def view_ips():
         lines = []
@@ -764,13 +771,13 @@ def run_tui():
                 if not all(0 <= v <= 255 for v in values):
                     raise ValueError
                 dns_octets[:] = values
+                infobox("Applying", "Applying DNS settings...")
                 subprocess.run(
                     ["nmcli", "connection", "modify", CONNECTION_NAME,
                      "ipv4.dns", text, "ipv4.ignore-auto-dns", "yes"],
                     check=True, capture_output=True,
                 )
                 subprocess.run(["nmcli", "con", "up", CONNECTION_NAME], check=True, capture_output=True)
-                msgbox("DNS", f"DNS set to {text}")
                 return
             except ValueError:
                 msgbox("Error", f"Invalid address '{text}'\nUse X.X.X.X (0-255)")
