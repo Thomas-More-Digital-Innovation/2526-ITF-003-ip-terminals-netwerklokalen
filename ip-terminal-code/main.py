@@ -16,6 +16,7 @@ import ipaddress
 import os
 import subprocess
 import sys
+import textwrap
 import time
 
 
@@ -35,8 +36,8 @@ CONNECTION_NAME = "end0"
 ipv6_method     = "auto"            # "auto", "dhcp", "manual", "disabled"
 IPV6_METHODS    = ["auto", "dhcp", "manual", "disabled"]
 IPV6_NAMES      = {
-    "auto": "Auto",
-    "dhcp": "Auto DHCP only",
+    "auto": "Automatic",
+    "dhcp": "Automatic (DHCP only)",
     "manual": "Manual",
     "disabled": "Disabled"
 }
@@ -345,8 +346,8 @@ def run_hardware():
         elif mode == "ip_mode":
             draw.text((5, 5), "IPv4 Settings", font=title_font, fill=COLOR_ACCENT)
             draw.line((5, 23, 123, 23), fill=COLOR_ACCENT)
+            current_y = 28
             for i, item in enumerate(IP_SUBMENU):
-                y = 28 + i * 16
                 prefix = "> " if i == ip_mode_index else "  "
                 color = COLOR_HIGHLIGHT if i == ip_mode_index else COLOR_TEXT
 
@@ -355,22 +356,35 @@ def run_hardware():
                     display_text = f"Mode: {'DHCP' if use_dhcp else 'Manual'}"
                 elif i in (1, 2, 3) and use_dhcp:
                     color = (100, 100, 100) # Grayed out
+                lines = textwrap.wrap(f"{prefix}{display_text}", width=18)
 
-                draw.text((5, y), f"{prefix}{display_text}", font=font, fill=color)
+                for j, line in enumerate(lines):
+                    draw.text((5, current_y), line, font=font, fill=color)
+                    current_y += 15 # Line height for font size 13
 
         elif mode == "ipv6_mode":
             draw.text((5, 5), "IPv6 Settings", font=title_font, fill=COLOR_ACCENT)
             draw.line((5, 23, 123, 23), fill=COLOR_ACCENT)
+            current_y = 28
             for i, item in enumerate(IPV6_SUBMENU):
-                y = 28 + i * 16
                 prefix = "> " if i == ipv6_mode_index else "  "
                 color = COLOR_HIGHLIGHT if i == ipv6_mode_index else COLOR_TEXT
 
-                display_text = item
                 if i == 0: # Mode
-                    display_text = f"Mode: {IPV6_NAMES.get(ipv6_method, ipv6_method)}"
+                    label = f"{prefix}Mode:"
+                    val_text = IPV6_NAMES.get(ipv6_method, ipv6_method)
+                    lines = [label]
+                    # Indent the value lines
+                    wrapped_val = textwrap.wrap(val_text, width=14)
+                    for w_line in wrapped_val:
+                        lines.append(f"    {w_line}")
+                else:
+                    display_text = item
+                    lines = textwrap.wrap(f"{prefix}{display_text}", width=18)
 
-                draw.text((5, y), f"{prefix}{display_text}", font=font, fill=color)
+                for line in lines:
+                    draw.text((5, current_y), line, font=font, fill=color)
+                    current_y += 15
 
         elif mode == "view_ip":
             draw.text((5, 5), "IP Addresses", font=title_font, fill=COLOR_ACCENT)
@@ -604,7 +618,6 @@ def run_hardware():
                     elif menu_index == 3: # View IPs
                         get_network_settings()
                         raw_list = get_live_ips()
-                        import textwrap
                         live_ip[:] = []
                         for entry in raw_list:
                             # Default color
