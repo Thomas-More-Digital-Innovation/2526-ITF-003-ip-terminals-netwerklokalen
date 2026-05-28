@@ -223,6 +223,11 @@
           inetutils    # telnet, etc.
           nmap         # nmap
 
+          # Python
+          python3
+          python3Packages.virtualenv
+          python3Packages.pip
+
           # Fonts
           dejavu_fonts
 
