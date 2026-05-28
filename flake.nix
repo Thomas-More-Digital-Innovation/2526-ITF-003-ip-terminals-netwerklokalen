@@ -78,6 +78,7 @@
           neededForBoot = true;
         };
         users.mutableUsers = false;
+        services.openssh.settings.PermitRootLogin = lib.mkForce "no";
       };
 
       persistence = { config, lib, ... }: {
@@ -161,7 +162,7 @@
         services.openssh = {
           enable = true;
           settings = {
-            PermitRootLogin = lib.mkForce "yes";
+            PermitRootLogin = "yes";
             PasswordAuthentication = true;
           };
         };
