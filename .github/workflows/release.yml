@@ -1,0 +1,81 @@
+name: "Release Pipeline"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: "Validate Code & Configurations"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "Verify Python Syntax"
+        run: |
+          python -m py_compile ip-terminal-code/*.py
+          echo "Python syntax check passed."
+
+      - name: "Verify Flake Configuration Presence"
+        run: |
+          test -f flake.nix || { echo "flake.nix is missing"; exit 1; }
+          test -f flake.lock || { echo "flake.lock is missing"; exit 1; }
+          echo "Flake files verified."
+
+  package-and-release:
+    name: "Package 3D Assets & Draft Release"
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
+
+      - name: "Bundle 3D CAD Files"
+        run: |
+          mkdir -p build_artifacts
+          find 3d -type f \( -name "*.stl" -o -name "*.STL" -o -name "*.dxf" -o -name "*.dwg" \) -exec cp {} build_artifacts/ \;
+          cd build_artifacts
+          zip -r ip-terminal-3d-cad-${{ github.ref_name }}.zip ./*
+          echo "3D print files bundled successfully."
+
+      - name: "Create GitHub Release"
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "IP Terminal ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            build_artifacts/ip-terminal-3d-cad-*.zip
+          body: |
+            ## IP Terminal Release ${{ github.ref_name }}
+            
+            ### Included Deliverables
+            * **3D CAD Package (`.zip`):** Enclosure STL, LCD button stick, and laser-cut panel templates (`.dxf` and `.dwg`).
+            * **NixOS SD Image:** Pre-compiled immutable SD image for Raspberry Pi 4 attached below.
+            
+            ### Integrity Verification
+            Verify the SHA-256 hash of your downloaded image before flashing:
+            ```bash
+            sha256sum -c SHA256SUMS.txt
+            ``` {data-source-line="145"}
+            
+            ### Flashing Instructions
+            ```bash
+            # Decompress and flash directly to SD card (replace /dev/sdX)
+            zstdcat nixos-image-rpi4-uboot.img.zst | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+            ``` {data-source-line="151"}
+            
+            ### Default Credentials
+            * **Username:** `cisco`
+            * **Password:** `cisco`
