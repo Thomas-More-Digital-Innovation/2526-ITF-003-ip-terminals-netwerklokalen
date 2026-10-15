@@ -68,13 +68,13 @@ jobs:
             Verify the SHA-256 hash of your downloaded image before flashing:
             ```bash
             sha256sum -c SHA256SUMS.txt
-            ``` {data-source-line="145"}
+            ```
             
             ### Flashing Instructions
             ```bash
             # Decompress and flash directly to SD card (replace /dev/sdX)
             zstdcat nixos-image-rpi4-uboot.img.zst | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
-            ``` {data-source-line="151"}
+            ```
             
             ### Default Credentials
             * **Username:** `cisco`
